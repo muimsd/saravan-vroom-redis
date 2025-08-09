@@ -1,0 +1,18 @@
+# Node.js
+node_modules/
+.env
+npm-debug.log
+dist/
+coverage/
+.DS_Store
+*.log
+
+# OS
+Thumbs.db
+
+# Docker
+*.local
+*.pid
+
+# VSCode
+.vscode/
