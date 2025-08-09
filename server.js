@@ -2,8 +2,10 @@ import express from "express";
 import axios from "axios";
 import crypto from "crypto";
 import { createClient } from "redis";
+import cors from "cors";
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 const redis = createClient({ url: "redis://redis:6379" });
