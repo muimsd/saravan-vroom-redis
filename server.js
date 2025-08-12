@@ -96,9 +96,124 @@ app.post("/", async (req, res) => {
   }
 });
 
-// Simple health endpoint
-app.get("/health", (req, res) => {
-  res.json({ ok: true, vroom: VROOM_URL, redis: REDIS_URL });
+// Health check helper for OSRM services
+async function checkOSRMHealth(baseUrl, profile) {
+  const testRoute = "77.1025,28.7041;77.1125,28.7141";
+  const url = `${baseUrl}/route/v1/driving/${testRoute}`;
+  
+  try {
+    const response = await axios.get(url, { 
+      timeout: 5000,
+      validateStatus: (status) => status < 500 // Accept 4xx as "reachable"
+    });
+    return {
+      profile,
+      url: baseUrl,
+      status: response.status,
+      ok: response.status < 400,
+      message: response.status < 400 ? "OK" : `HTTP ${response.status}`
+    };
+  } catch (error) {
+    return {
+      profile,
+      url: baseUrl,
+      status: 0,
+      ok: false,
+      message: error.code || error.message || "Connection failed"
+    };
+  }
+}
+
+// Health check helper for VROOM service with specific profile
+async function checkVroomHealth(baseUrl, profile) {
+  const testRequest = {
+    vehicles: [{
+      id: 1,
+      profile: profile,
+      start: [77.2197, 28.6328]
+    }],
+    jobs: [{
+      id: 1,
+      location: [77.2295, 28.6129]
+    }]
+  };
+
+  try {
+    const response = await axios.post(baseUrl, testRequest, {
+      headers: { "Content-Type": "application/json" },
+      timeout: 5000,
+      validateStatus: (status) => status < 500
+    });
+    return {
+      service: "vroom",
+      profile: profile,
+      url: baseUrl,
+      status: response.status,
+      ok: response.status < 400,
+      message: response.status < 400 ? "OK" : `HTTP ${response.status}`
+    };
+  } catch (error) {
+    return {
+      service: "vroom",
+      profile: profile,
+      url: baseUrl,
+      status: 0,
+      ok: false,
+      message: error.code || error.message || "Connection failed"
+    };
+  }
+}
+
+// Health check helper for Redis service
+async function checkRedisHealth() {
+  try {
+    const pong = await redis.ping();
+    return {
+      service: "redis",
+      url: REDIS_URL,
+      status: 200,
+      ok: pong === "PONG",
+      message: pong === "PONG" ? "OK" : "Unexpected ping response"
+    };
+  } catch (error) {
+    return {
+      service: "redis",
+      url: REDIS_URL,
+      status: 0,
+      ok: false,
+      message: error.message || "Connection failed"
+    };
+  }
+}
+
+// Enhanced health endpoint with all service checks
+app.get("/health", async (req, res) => {
+  const [osrmChecks, vroomChecks, redisCheck] = await Promise.all([
+    Promise.all([
+      checkOSRMHealth("http://osrm-motorbike:5000", "motorbike"),
+      checkOSRMHealth("http://osrm-small-truck:5000", "smalltruck")
+    ]),
+    Promise.all([
+      checkVroomHealth(VROOM_URL, "motorbike"),
+      checkVroomHealth(VROOM_URL, "smalltruck")
+    ]),
+    checkRedisHealth()
+  ]);
+
+  const allHealthy = [
+    ...osrmChecks,
+    ...vroomChecks,
+    redisCheck
+  ].every(check => check.ok);
+  
+  res.json({ 
+    ok: allHealthy, 
+    services: {
+      vroom_profiles: vroomChecks,
+      redis: redisCheck,
+      osrm_profiles: osrmChecks
+    }
+  });
 });
 
 app.listen(4000, () => {
